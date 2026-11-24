@@ -237,6 +237,21 @@ button { cursor: pointer; }
 
 .ap-tabs button.on { color: var(--accent); font-weight: 600; }
 
+/* 待审角标：底栏「待审」上的数量 */
+.ap-count {
+  display: inline-block;
+  min-width: 15px;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 10px;
+  font-style: normal;
+  line-height: 15px;
+  vertical-align: 1px;
+}
+
 /* ---------- 详情 ---------- */
 
 .ap-detail { height: 100vh; display: flex; flex-direction: column; background: var(--bg); }

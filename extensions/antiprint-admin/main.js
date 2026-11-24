@@ -6,7 +6,7 @@
 // 依赖宿主服务：ui / storage / notify（对应 ext.json 的 storage、network、notification 权限）
 
 const DEFAULT_BASE = 'https://print.anticraft.top';
-const POLL_MS = 30000;
+const POLL_MS = 15000;
 const STATUS_FILTERS = [
   '全部', '待审核', '已通过', '打印中', '已打印',
   '待配送', '待取件', '已完成', '已驳回', '打印失败', '已撤回',
@@ -132,6 +132,18 @@ export default {
       }
     }
 
+    // 首次登录后先发一条提醒：顺便申请系统通知权限，避免第一条真实提醒被权限弹窗吞掉
+    async function primeNotifications() {
+      if (!state.notifyOn) return;
+      if ((await ctx.storage.get('notifyPrimed')) === true) return;
+      Promise.resolve(ctx.notify.show({
+        key: 'notify-primed',
+        title: '新任务提醒已开启',
+        body: '队列有新上传的任务时会在这里提醒你',
+      })).catch(() => {});
+      await ctx.storage.set('notifyPrimed', true);
+    }
+
     async function login(username, password) {
       const data = await api('/api/login', { method: 'POST', body: { username, password } });
       const role = data && data.user ? data.user.role : '';
@@ -146,6 +158,7 @@ export default {
       state.jobIds = null;
       await refreshAll(true);
       startPolling();
+      await primeNotifications();
       render();
     }
 
@@ -535,7 +548,11 @@ export default {
         (state.loading ? '<div class="ap-loading">加载中…</div>' : '') +
         '<main class="ap-list">' + body + '</main>' +
         '<nav class="ap-tabs">' +
-        '<button class="' + (state.tab === 'pending' ? 'on' : '') + '" data-action="tab" data-tab="pending">待审</button>' +
+        '<button class="' + (state.tab === 'pending' ? 'on' : '') + '" data-action="tab" data-tab="pending">待审' +
+        (state.jobs.filter((job) => job.status === '待审核').length
+          ? '<i class="ap-count">' + state.jobs.filter((job) => job.status === '待审核').length + '</i>'
+          : '') +
+        '</button>' +
         '<button class="' + (state.tab === 'jobs' ? 'on' : '') + '" data-action="tab" data-tab="jobs">任务</button>' +
         '<button class="' + (state.tab === 'users' ? 'on' : '') + '" data-action="tab" data-tab="users">用户</button>' +
         '</nav>' +
@@ -666,7 +683,7 @@ export default {
         '<dl class="ap-dl">' +
         '<dt>服务器</dt><dd>' + esc(state.base) + '</dd>' +
         '<dt>账号</dt><dd>' + esc(state.me ? state.me.username : '-') + '（' + esc(state.me ? state.me.role : '-') + '）</dd>' +
-        '<dt>轮询</dt><dd>每 ' + Math.round(POLL_MS / 1000) + ' 秒检查新待审（页面打开时生效）</dd>' +
+        '<dt>轮询</dt><dd>每 ' + Math.round(POLL_MS / 1000) + ' 秒检查新任务（页面打开时生效，切回前台会立即刷新）</dd>' +
         '</dl>' +
         '<button class="ap-btn block" data-role="notify">待审通知：' + (state.notifyOn ? '开' : '关') + '</button>' +
         '<button class="ap-btn block danger" data-role="logout">退出登录</button>' +
@@ -690,6 +707,7 @@ export default {
               title: '新任务提醒已开启',
               body: '队列里有新上传的任务时会在这里提醒你',
             })).catch(() => {});
+            await ctx.storage.set('notifyPrimed', true);
           }
         } else if (value === 'logout') {
           mask.remove();
@@ -758,6 +776,7 @@ export default {
         await persistLongLivedToken();
         await refreshAll(true);
         startPolling();
+        await primeNotifications();
       } catch (err) {
         state.token = '';
         await ctx.storage.remove('token');
