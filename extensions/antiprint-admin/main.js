@@ -108,6 +108,30 @@ export default {
     }
 
     // ── 登录态 ──
+    // 网站签发的登录 JWT 只有 24 小时；拓展登录成功后立刻换成长期 API 令牌（ap_），
+    // 之后只要不主动退出 / 不在网站上撤销，就不会再被踢下线。
+    const AUTO_TOKEN_NAME = 'AntiSIT 拓展（自动）';
+
+    async function persistLongLivedToken() {
+      if (!state.token || state.token.startsWith('ap_')) return;
+      try {
+        // 先撤掉上次自动生成的，避免令牌列表越积越多
+        const list = await api('/api/tokens');
+        for (const item of (list.tokens || [])) {
+          if (item.name === AUTO_TOKEN_NAME && !item.revoked_at) {
+            await api('/api/tokens/' + item.id, { method: 'DELETE' }).catch(() => {});
+          }
+        }
+        const minted = await api('/api/tokens', { method: 'POST', body: { name: AUTO_TOKEN_NAME } });
+        if (minted && minted.token) {
+          state.token = minted.token;
+          await ctx.storage.set('token', minted.token);
+        }
+      } catch (_) {
+        // 换令牌失败就先用 JWT 跑，24 小时内下次打开 / 登录还会再试
+      }
+    }
+
     async function login(username, password) {
       const data = await api('/api/login', { method: 'POST', body: { username, password } });
       const role = data && data.user ? data.user.role : '';
@@ -118,7 +142,8 @@ export default {
       state.me = data.user;
       await ctx.storage.set('token', data.token);
       await ctx.storage.set('base', state.base);
-      state.pendingSig = '';
+      await persistLongLivedToken();
+      state.jobIds = null;
       await refreshAll(true);
       startPolling();
       render();
@@ -126,6 +151,15 @@ export default {
 
     async function logout(silent) {
       stopPolling();
+      // 撤销拓展自动生成的长期令牌，避免退出后还留着一条有效凭证
+      try {
+        const list = await api('/api/tokens');
+        for (const item of (list.tokens || [])) {
+          if (item.name === AUTO_TOKEN_NAME && !item.revoked_at) {
+            await api('/api/tokens/' + item.id, { method: 'DELETE' }).catch(() => {});
+          }
+        }
+      } catch (_) {}
       state.token = '';
       state.me = null;
       state.jobs = [];
@@ -720,6 +754,8 @@ export default {
     if (state.token) {
       try {
         state.me = await api('/api/me');
+        // 老版本存的是 24 小时 JWT：能连上就顺手换成长期令牌，用户无感
+        await persistLongLivedToken();
         await refreshAll(true);
         startPolling();
       } catch (err) {
